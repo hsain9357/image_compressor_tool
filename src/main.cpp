@@ -9,6 +9,9 @@
 #include <stdio.h>
 #include <iomanip>
 #include <fstream>
+#include <thread>
+#include <mutex>
+#include <future>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -16,6 +19,9 @@
 #include "stb_image_write.h"
 
 namespace fs = std::filesystem;
+
+std::mutex cout_mutex;
+
 
 std::string format_size(uintmax_t bytes) {
     if (bytes < 1024) return std::to_string(bytes) + " B";
@@ -170,25 +176,39 @@ void process_directory(const fs::path& input_dir, int quality, bool same_format)
     std::cout << std::left << std::setw(30) << "File" << std::setw(15) << "Original" << std::setw(15) << "Compressed" << "Reduction" << std::endl;
     std::cout << std::string(80, '-') << std::endl;
 
+    std::vector<fs::path> files;
     for (const auto& entry : fs::directory_iterator(input_dir)) {
         if (entry.is_regular_file()) {
             std::string ext = entry.path().extension().string();
             for (auto& c : ext) c = std::tolower(c);
             if (ext == ".jpg" || ext == ".jpeg" || ext == ".png") {
-                fs::path output_file = output_dir / entry.path().filename();
-                if (!same_format) output_file.replace_extension(".webp");
-                uintmax_t old_size = fs::file_size(entry.path());
-                if (compress_image(entry.path(), output_file, quality, same_format)) {
-                    uintmax_t new_size = fs::file_size(output_file);
-                    double ratio = (1.0 - (double)new_size / old_size) * 100.0;
-                    std::cout << std::left << std::setw(30) << entry.path().filename().string().substr(0, 29)
-                              << std::setw(15) << format_size(old_size)
-                              << std::setw(15) << format_size(new_size)
-                              << std::fixed << std::setprecision(1) << ratio << "%" << std::endl;
-                }
+                files.push_back(entry.path());
             }
         }
     }
+
+    std::vector<std::future<void>> futures;
+    for (const auto& file_path : files) {
+        futures.push_back(std::async(std::launch::async, [&, file_path]() {
+            fs::path output_file = output_dir / file_path.filename();
+            if (!same_format) output_file.replace_extension(".webp");
+            uintmax_t old_size = fs::file_size(file_path);
+            
+            if (compress_image(file_path, output_file, quality, same_format)) {
+                uintmax_t new_size = fs::file_size(output_file);
+                double ratio = (1.0 - (double)new_size / old_size) * 100.0;
+                
+                std::lock_guard<std::mutex> lock(cout_mutex);
+                std::cout << std::left << std::setw(30) << file_path.filename().string().substr(0, 29)
+                          << std::setw(15) << format_size(old_size)
+                          << std::setw(15) << format_size(new_size)
+                          << std::fixed << std::setprecision(1) << ratio << "%" << std::endl;
+            }
+        }));
+    }
+
+    for (auto& f : futures) f.get();
+    
     std::cout << std::string(80, '-') << std::endl << std::endl;
 }
 
