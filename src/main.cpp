@@ -4,6 +4,7 @@
 #include <vector>
 #include <jpeglib.h>
 #include <stdio.h>
+#include <iomanip>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -11,6 +12,17 @@
 #include "stb_image_write.h"
 
 namespace fs = std::filesystem;
+
+struct Stats {
+    uintmax_t original_size = 0;
+    uintmax_t compressed_size = 0;
+};
+
+std::string format_size(uintmax_t bytes) {
+    if (bytes < 1024) return std::to_string(bytes) + " B";
+    if (bytes < 1024 * 1024) return std::to_string(bytes / 1024) + " KB";
+    return std::to_string(bytes / (1024 * 1024)) + " MB";
+}
 
 bool compress_jpeg(const fs::path& input_path, const fs::path& output_path, int quality, int width, int height, unsigned char* img) {
     struct jpeg_compress_struct cinfo;
@@ -22,9 +34,7 @@ bool compress_jpeg(const fs::path& input_path, const fs::path& output_path, int 
     cinfo.err = jpeg_std_error(&jerr);
     jpeg_create_compress(&cinfo);
 
-    if ((outfile = fopen(output_path.c_str(), "wb")) == NULL) {
-        return false;
-    }
+    if ((outfile = fopen(output_path.c_str(), "wb")) == NULL) return false;
     jpeg_stdio_dest(&cinfo, outfile);
 
     cinfo.image_width = width;
@@ -51,32 +61,25 @@ bool compress_jpeg(const fs::path& input_path, const fs::path& output_path, int 
 bool compress_image(const fs::path& input_path, const fs::path& output_path, int quality) {
     int width, height, channels;
     unsigned char* img = stbi_load(input_path.c_str(), &width, &height, &channels, 0);
-    if (!img) {
-        std::cerr << "Failed to load: " << input_path << std::endl;
-        return false;
-    }
+    if (!img) return false;
 
     std::string ext = output_path.extension().string();
     for (auto& c : ext) c = std::tolower(c);
 
     bool success = false;
     if (ext == ".jpg" || ext == ".jpeg") {
-        // If it's a JPEG, ensure we have 3 channels for jpeglib or reload if necessary
         if (channels != 3) {
             stbi_image_free(img);
             img = stbi_load(input_path.c_str(), &width, &height, &channels, 3);
         }
         success = compress_jpeg(input_path, output_path, quality, width, height, img);
     } else if (ext == ".png") {
-        // PNG quality is 0-9 (compression level). We map 100-quality to 0-9.
-        // 40 quality (user default) -> 60% compression effort -> roughly level 6.
-        int z_level = (100 - quality) / 10; 
+        int z_level = (100 - quality) / 10;
         if (z_level > 9) z_level = 9;
         if (z_level < 0) z_level = 0;
         stbi_write_png_compression_level = z_level;
         success = stbi_write_png(output_path.c_str(), width, height, channels, img, width * channels);
     } else {
-        // Fallback for other formats (BMP, TGA) supported by stb_image_write
         success = stbi_write_jpg(output_path.c_str(), width, height, channels, img, quality);
     }
 
@@ -90,7 +93,10 @@ void process_directory(const fs::path& input_dir, int quality) {
 
     if (!fs::exists(output_dir)) fs::create_directories(output_dir);
 
-    std::cout << "Processing: " << input_dir.filename() << " -> " << output_dir.filename() << " (" << quality << "%)" << std::endl;
+    std::cout << "\033[1;33mProcessing: " << input_dir.filename() << " (" << quality << "% quality)\033[0m" << std::endl;
+    std::cout << std::string(80, '-') << std::endl;
+    std::cout << std::left << std::setw(25) << "File" << std::setw(15) << "Original" << std::setw(15) << "Compressed" << "Reduction" << std::endl;
+    std::cout << std::string(80, '-') << std::endl;
 
     for (const auto& entry : fs::directory_iterator(input_dir)) {
         if (entry.is_regular_file()) {
@@ -99,17 +105,36 @@ void process_directory(const fs::path& input_dir, int quality) {
 
             if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp") {
                 fs::path output_file = output_dir / entry.path().filename();
+                uintmax_t old_size = fs::file_size(entry.path());
+                
                 if (compress_image(entry.path(), output_file, quality)) {
-                    std::cout << "  Done: " << entry.path().filename() << std::endl;
+                    uintmax_t new_size = fs::file_size(output_file);
+                    double ratio = (1.0 - (double)new_size / old_size) * 100.0;
+                    
+                    std::cout << std::left << std::setw(25) << entry.path().filename().string().substr(0, 24)
+                              << std::setw(15) << format_size(old_size)
+                              << std::setw(15) << format_size(new_size)
+                              << std::fixed << std::setprecision(1) << ratio << "%" << std::endl;
                 }
             }
         }
     }
+    std::cout << std::string(80, '-') << std::endl << std::endl;
 }
 
 int main(int argc, char* argv[]) {
+    std::cout << "\033[1;36m" << "  _____                     _ " << std::endl;
+    std::cout << " |_   _|                   | |" << std::endl;
+    std::cout << "   | |  _ __ ___   __ _  __| |" << std::endl;
+    std::cout << "   | | | '_ ` _ \\ / _` |/ _` |" << std::endl;
+    std::cout << "  _| |_| | | | | | (_| | (_| |" << std::endl;
+    std::cout << " |_____|_| |_| |_|\\__, |\\__,_|" << std::endl;
+    std::cout << "         COMPRESS |___/       " << "\033[0m" << std::endl << std::endl;
+
     int quality = 40;
-    if (argc > 1) quality = std::stoi(argv[1]);
+    if (argc > 1) {
+        try { quality = std::stoi(argv[1]); } catch (...) {}
+    }
 
     bool found = false;
     for (const auto& entry : fs::directory_iterator(fs::current_path())) {
@@ -119,6 +144,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    if (!found) std::cout << "No 'input*' folders found." << std::endl;
+    if (!found) std::cout << "No 'input*' folders found in current directory." << std::endl;
     return 0;
 }
