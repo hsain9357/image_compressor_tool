@@ -5,6 +5,7 @@
 #include <jpeglib.h>
 #include <webp/encode.h>
 #include <libimagequant.h>
+#include <png.h>
 #include <stdio.h>
 #include <iomanip>
 #include <fstream>
@@ -51,28 +52,63 @@ bool compress_jpeg(const fs::path& output_path, int quality, int width, int heig
     return true;
 }
 
+bool write_indexed_png(const char* filename, int width, int height, unsigned char* indices, const liq_palette* pal) {
+    FILE* fp = fopen(filename, "wb");
+    if (!fp) return false;
+
+    png_structp png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    if (!png_ptr) { fclose(fp); return false; }
+
+    png_infop info_ptr = png_create_info_struct(png_ptr);
+    if (!info_ptr) { png_destroy_write_struct(&png_ptr, NULL); fclose(fp); return false; }
+
+    if (setjmp(png_jmpbuf(png_ptr))) { png_destroy_write_struct(&png_ptr, &info_ptr); fclose(fp); return false; }
+
+    png_init_io(png_ptr, fp);
+    png_set_IHDR(png_ptr, info_ptr, width, height, 8, PNG_COLOR_TYPE_PALETTE,
+                 PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+
+    png_color palette[256];
+    png_byte trans[256];
+    int num_trans = 0;
+    for (int i = 0; i < pal->count; i++) {
+        palette[i].red = pal->entries[i].r;
+        palette[i].green = pal->entries[i].g;
+        palette[i].blue = pal->entries[i].b;
+        trans[i] = pal->entries[i].a;
+        if (pal->entries[i].a < 255) num_trans = i + 1;
+    }
+
+    png_set_PLTE(png_ptr, info_ptr, palette, pal->count);
+    if (num_trans > 0) png_set_tRNS(png_ptr, info_ptr, trans, num_trans, NULL);
+
+    png_write_info(png_ptr, info_ptr);
+    for (int y = 0; y < height; y++) {
+        png_write_row(png_ptr, &indices[y * width]);
+    }
+    png_write_end(png_ptr, info_ptr);
+
+    png_destroy_write_struct(&png_ptr, &info_ptr);
+    fclose(fp);
+    return true;
+}
+
 bool compress_png(const fs::path& output_path, int quality, int width, int height, unsigned char* img) {
     liq_attr *attr = liq_attr_create();
     liq_set_quality(attr, 0, quality);
     liq_image *liq_img = liq_image_create_rgba(attr, img, width, height, 0);
     liq_result *res;
     bool success = false;
+    
     if (liq_image_quantize(liq_img, attr, &res) == LIQ_OK) {
         liq_set_dithering_level(res, 1.0);
-        unsigned char *quantized_rgba = (unsigned char *)malloc(width * height * 4);
-        const liq_palette *pal = liq_get_palette(res);
         unsigned char *indices = (unsigned char *)malloc(width * height);
+        const liq_palette *pal = liq_get_palette(res);
         liq_write_remapped_image(res, liq_img, indices, width * height);
-        for (int i = 0; i < width * height; i++) {
-            quantized_rgba[i*4]   = pal->entries[indices[i]].r;
-            quantized_rgba[i*4+1] = pal->entries[indices[i]].g;
-            quantized_rgba[i*4+2] = pal->entries[indices[i]].b;
-            quantized_rgba[i*4+3] = pal->entries[indices[i]].a;
-        }
-        stbi_write_png_compression_level = 9;
-        success = stbi_write_png(output_path.c_str(), width, height, 4, quantized_rgba, width * 4);
+        
+        success = write_indexed_png(output_path.c_str(), width, height, indices, pal);
+        
         free(indices);
-        free(quantized_rgba);
         liq_result_destroy(res);
     }
     liq_image_destroy(liq_img);
