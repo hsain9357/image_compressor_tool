@@ -1,6 +1,6 @@
 CXX = g++
-CXXFLAGS = -std=c++17 -O3 -I./include
-LDFLAGS = -ljpeg
+CXXFLAGS = -std=c++17 -O3 -I./include -I./libimagequant/imagequant-sys
+LDFLAGS = -ljpeg -lwebp -L./libimagequant/imagequant-sys/target/release -limagequant_sys -lpthread -ldl
 
 TARGET = imgcomp
 SRC = src/main.cpp

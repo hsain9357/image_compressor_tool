@@ -3,10 +3,11 @@
 #include <string>
 #include <vector>
 #include <jpeglib.h>
+#include <webp/encode.h>
+#include <libimagequant.h>
 #include <stdio.h>
 #include <iomanip>
-#include <set>
-#include <map>
+#include <fstream>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -15,7 +16,6 @@
 
 namespace fs = std::filesystem;
 
-// Formatting for file sizes
 std::string format_size(uintmax_t bytes) {
     if (bytes < 1024) return std::to_string(bytes) + " B";
     if (bytes < 1024 * 1024) return std::to_string(bytes / 1024) + " KB";
@@ -24,71 +24,30 @@ std::string format_size(uintmax_t bytes) {
     return ss.str();
 }
 
-// Optimized JPEG compression
-bool compress_jpeg(const fs::path& output_path, int quality, int width, int height, unsigned char* img) {
-    struct jpeg_compress_struct cinfo;
-    struct jpeg_error_mgr jerr;
-    FILE* outfile;
-    JSAMPROW row_pointer[1];
-    cinfo.err = jpeg_std_error(&jerr);
-    jpeg_create_compress(&cinfo);
-    if ((outfile = fopen(output_path.c_str(), "wb")) == NULL) return false;
-    jpeg_stdio_dest(&cinfo, outfile);
-    cinfo.image_width = width;
-    cinfo.image_height = height;
-    cinfo.input_components = 3;
-    cinfo.in_color_space = JCS_RGB;
-    jpeg_set_defaults(&cinfo);
-    jpeg_set_quality(&cinfo, quality, TRUE);
-    jpeg_start_compress(&cinfo, TRUE);
-    int row_stride = width * 3;
-    while (cinfo.next_scanline < cinfo.image_height) {
-        row_pointer[0] = &img[cinfo.next_scanline * row_stride];
-        jpeg_write_scanlines(&cinfo, row_pointer, 1);
+bool compress_webp(const fs::path& output_path, int quality, int width, int height, unsigned char* img, int channels) {
+    uint8_t* output;
+    size_t size;
+    if (channels == 3) {
+        size = WebPEncodeRGB(img, width, height, width * 3, (float)quality, &output);
+    } else {
+        size = WebPEncodeRGBA(img, width, height, width * 4, (float)quality, &output);
     }
-    jpeg_finish_compress(&cinfo);
-    fclose(outfile);
-    jpeg_destroy_compress(&cinfo);
-    return true;
-}
 
-// Lossy PNG compression via simple color quantization
-// This simulates the "Lossy PNG" behavior of websites
-void quantize_rgba(unsigned char* img, int width, int height, int quality) {
-    // A quality of 40 means we reduce precision of colors
-    // This allows the PNG compression (deflate) to find much larger patterns
-    int shift = 8 - (quality / 15 + 1); // Quality 40 -> shift 3 bits
-    if (shift < 1) shift = 1;
-    if (shift > 6) shift = 6;
+    if (size == 0) return false;
 
-    for (int i = 0; i < width * height * 4; i++) {
-        // Quantize each channel to reduce unique colors
-        img[i] = (img[i] >> shift) << shift;
-    }
+    std::ofstream out(output_path, std::ios::binary);
+    out.write((char*)output, size);
+    WebPFree(output);
+    return out.good();
 }
 
 bool compress_image(const fs::path& input_path, const fs::path& output_path, int quality) {
     int width, height, channels;
-    // Load as 4 channels (RGBA) for consistent processing
+    // Load as RGBA to handle all formats consistently
     unsigned char* img = stbi_load(input_path.c_str(), &width, &height, &channels, 4);
     if (!img) return false;
 
-    std::string ext = output_path.extension().string();
-    for (auto& c : ext) c = std::tolower(c);
-
-    bool success = false;
-    if (ext == ".jpg" || ext == ".jpeg") {
-        unsigned char* img3 = stbi_load(input_path.c_str(), &width, &height, &channels, 3);
-        success = compress_jpeg(output_path, quality, width, height, img3);
-        stbi_image_free(img3);
-    } else if (ext == ".png") {
-        // Apply lossy quantization to the PNG
-        quantize_rgba(img, width, height, quality);
-        
-        // Save with maximum ZLIB compression effort
-        stbi_write_png_compression_level = 9;
-        success = stbi_write_png(output_path.c_str(), width, height, 4, img, width * 4);
-    }
+    bool success = compress_webp(output_path, quality, width, height, img, 4);
 
     stbi_image_free(img);
     return success;
@@ -110,6 +69,7 @@ void process_directory(const fs::path& input_dir, int quality) {
             for (auto& c : ext) c = std::tolower(c);
             if (ext == ".jpg" || ext == ".jpeg" || ext == ".png") {
                 fs::path output_file = output_dir / entry.path().filename();
+                output_file.replace_extension(".webp");
                 uintmax_t old_size = fs::file_size(entry.path());
                 if (compress_image(entry.path(), output_file, quality)) {
                     uintmax_t new_size = fs::file_size(output_file);
