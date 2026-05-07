@@ -24,6 +24,62 @@ std::string format_size(uintmax_t bytes) {
     return ss.str();
 }
 
+bool compress_jpeg(const fs::path& output_path, int quality, int width, int height, unsigned char* img) {
+    struct jpeg_compress_struct cinfo;
+    struct jpeg_error_mgr jerr;
+    FILE* outfile;
+    JSAMPROW row_pointer[1];
+    cinfo.err = jpeg_std_error(&jerr);
+    jpeg_create_compress(&cinfo);
+    if ((outfile = fopen(output_path.c_str(), "wb")) == NULL) return false;
+    jpeg_stdio_dest(&cinfo, outfile);
+    cinfo.image_width = width;
+    cinfo.image_height = height;
+    cinfo.input_components = 3;
+    cinfo.in_color_space = JCS_RGB;
+    jpeg_set_defaults(&cinfo);
+    jpeg_set_quality(&cinfo, quality, TRUE);
+    jpeg_start_compress(&cinfo, TRUE);
+    int row_stride = width * 3;
+    while (cinfo.next_scanline < cinfo.image_height) {
+        row_pointer[0] = &img[cinfo.next_scanline * row_stride];
+        jpeg_write_scanlines(&cinfo, row_pointer, 1);
+    }
+    jpeg_finish_compress(&cinfo);
+    fclose(outfile);
+    jpeg_destroy_compress(&cinfo);
+    return true;
+}
+
+bool compress_png(const fs::path& output_path, int quality, int width, int height, unsigned char* img) {
+    liq_attr *attr = liq_attr_create();
+    liq_set_quality(attr, 0, quality);
+    liq_image *liq_img = liq_image_create_rgba(attr, img, width, height, 0);
+    liq_result *res;
+    bool success = false;
+    if (liq_image_quantize(liq_img, attr, &res) == LIQ_OK) {
+        liq_set_dithering_level(res, 1.0);
+        unsigned char *quantized_rgba = (unsigned char *)malloc(width * height * 4);
+        const liq_palette *pal = liq_get_palette(res);
+        unsigned char *indices = (unsigned char *)malloc(width * height);
+        liq_write_remapped_image(res, liq_img, indices, width * height);
+        for (int i = 0; i < width * height; i++) {
+            quantized_rgba[i*4]   = pal->entries[indices[i]].r;
+            quantized_rgba[i*4+1] = pal->entries[indices[i]].g;
+            quantized_rgba[i*4+2] = pal->entries[indices[i]].b;
+            quantized_rgba[i*4+3] = pal->entries[indices[i]].a;
+        }
+        stbi_write_png_compression_level = 9;
+        success = stbi_write_png(output_path.c_str(), width, height, 4, quantized_rgba, width * 4);
+        free(indices);
+        free(quantized_rgba);
+        liq_result_destroy(res);
+    }
+    liq_image_destroy(liq_img);
+    liq_attr_destroy(attr);
+    return success;
+}
+
 bool compress_webp(const fs::path& output_path, int quality, int width, int height, unsigned char* img, int channels) {
     uint8_t* output;
     size_t size;
@@ -32,33 +88,48 @@ bool compress_webp(const fs::path& output_path, int quality, int width, int heig
     } else {
         size = WebPEncodeRGBA(img, width, height, width * 4, (float)quality, &output);
     }
-
     if (size == 0) return false;
-
     std::ofstream out(output_path, std::ios::binary);
     out.write((char*)output, size);
     WebPFree(output);
     return out.good();
 }
 
-bool compress_image(const fs::path& input_path, const fs::path& output_path, int quality) {
+bool compress_image(const fs::path& input_path, const fs::path& output_path, int quality, bool same_format) {
     int width, height, channels;
-    // Load as RGBA to handle all formats consistently
-    unsigned char* img = stbi_load(input_path.c_str(), &width, &height, &channels, 4);
-    if (!img) return false;
+    std::string ext = output_path.extension().string();
+    for (auto& c : ext) c = std::tolower(c);
 
-    bool success = compress_webp(output_path, quality, width, height, img, 4);
-
-    stbi_image_free(img);
-    return success;
+    if (!same_format) {
+        unsigned char* img = stbi_load(input_path.c_str(), &width, &height, &channels, 4);
+        if (!img) return false;
+        bool success = compress_webp(output_path, quality, width, height, img, 4);
+        stbi_image_free(img);
+        return success;
+    } else {
+        if (ext == ".jpg" || ext == ".jpeg") {
+            unsigned char* img = stbi_load(input_path.c_str(), &width, &height, &channels, 3);
+            if (!img) return false;
+            bool success = compress_jpeg(output_path, quality, width, height, img);
+            stbi_image_free(img);
+            return success;
+        } else if (ext == ".png") {
+            unsigned char* img = stbi_load(input_path.c_str(), &width, &height, &channels, 4);
+            if (!img) return false;
+            bool success = compress_png(output_path, quality, width, height, img);
+            stbi_image_free(img);
+            return success;
+        }
+    }
+    return false;
 }
 
-void process_directory(const fs::path& input_dir, int quality) {
+void process_directory(const fs::path& input_dir, int quality, bool same_format) {
     std::string folder_name = input_dir.filename().string();
     fs::path output_dir = input_dir.parent_path() / (folder_name + "_com");
     if (!fs::exists(output_dir)) fs::create_directories(output_dir);
 
-    std::cout << "\033[1;33mProcessing: " << input_dir.filename() << " (" << quality << "% quality)\033[0m" << std::endl;
+    std::cout << "\033[1;33mProcessing: " << input_dir.filename() << " (" << quality << "% quality, format: " << (same_format ? "original" : "webp") << ")\033[0m" << std::endl;
     std::cout << std::string(80, '-') << std::endl;
     std::cout << std::left << std::setw(30) << "File" << std::setw(15) << "Original" << std::setw(15) << "Compressed" << "Reduction" << std::endl;
     std::cout << std::string(80, '-') << std::endl;
@@ -69,9 +140,9 @@ void process_directory(const fs::path& input_dir, int quality) {
             for (auto& c : ext) c = std::tolower(c);
             if (ext == ".jpg" || ext == ".jpeg" || ext == ".png") {
                 fs::path output_file = output_dir / entry.path().filename();
-                output_file.replace_extension(".webp");
+                if (!same_format) output_file.replace_extension(".webp");
                 uintmax_t old_size = fs::file_size(entry.path());
-                if (compress_image(entry.path(), output_file, quality)) {
+                if (compress_image(entry.path(), output_file, quality, same_format)) {
                     uintmax_t new_size = fs::file_size(output_file);
                     double ratio = (1.0 - (double)new_size / old_size) * 100.0;
                     std::cout << std::left << std::setw(30) << entry.path().filename().string().substr(0, 29)
@@ -95,12 +166,15 @@ int main(int argc, char* argv[]) {
     std::cout << "         COMPRESS |___/       " << "\033[0m" << std::endl << std::endl;
 
     int quality = 40;
+    bool same_format = false;
+
     if (argc > 1) { try { quality = std::stoi(argv[1]); } catch (...) {} }
+    if (argc > 2 && std::string(argv[2]) == "same") { same_format = true; }
 
     bool found = false;
     for (const auto& entry : fs::directory_iterator(fs::current_path())) {
         if (entry.is_directory() && entry.path().filename().string().find("input") == 0) {
-            process_directory(entry.path(), quality);
+            process_directory(entry.path(), quality, same_format);
             found = true;
         }
     }
