@@ -5,7 +5,7 @@ Compresses all JPEG/PNG images inside directories prefixed with `input` in the c
 ## Usage
 
 ```
-imgcomp [quality] [mode]
+imgcomp [quality] [mode] [options]
 ```
 
 | Argument  | Default | Description |
@@ -13,7 +13,14 @@ imgcomp [quality] [mode]
 | `quality` | `40`    | Compression quality 0–100. Higher = better quality, larger file. |
 | `mode`    | webp    | Set to `same` to keep original format; otherwise all images are transcoded to WebP. |
 
-## How It Works
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `-i, --input <dir>`  | Process only this directory (overrides auto-detection) |
+| `-o, --output <dir>` | Output directory (requires `--input`) |
+
+## How It Works (default mode)
 
 1. Scans the current directory for folders whose name starts with `input`.
 2. For each folder, creates a sibling output folder with `_com` suffix (e.g. `input_test` → `input_test_com`).
@@ -39,6 +46,12 @@ imgcomp 75
 
 # Keep original formats, quality 50
 imgcomp 50 same
+
+# Process a specific folder
+imgcomp --input photos
+
+# Custom input and output directories
+imgcomp 75 --input photos --output compressed
 
 # Quick max-quality compression
 imgcomp 100 same

@@ -214,18 +214,25 @@ void process_directory(const fs::path& input_dir, int quality, bool same_format,
 }
 
 void print_usage() {
-    std::cout << "Usage: imgcomp [quality] [mode]" << std::endl;
+    std::cout << "Usage: imgcomp [quality] [mode] [options]" << std::endl;
     std::cout << std::endl;
     std::cout << "Compresses all JPEG/PNG images inside directories prefixed with 'input'." << std::endl;
     std::cout << std::endl;
+    std::cout << "Positional:" << std::endl;
     std::cout << "  quality  Compression quality 0-100 (default: 40)" << std::endl;
     std::cout << "  mode     Set to 'same' to keep original format; otherwise all" << std::endl;
     std::cout << "           images are transcoded to WebP (default: webp)" << std::endl;
     std::cout << std::endl;
+    std::cout << "Options:" << std::endl;
+    std::cout << "  -i, --input <dir>    Process only this directory (overrides auto-detection)" << std::endl;
+    std::cout << "  -o, --output <dir>   Output directory (requires --input)" << std::endl;
+    std::cout << std::endl;
     std::cout << "Examples:" << std::endl;
-    std::cout << "  imgcomp            compress all input*/ folders to WebP at quality 40" << std::endl;
-    std::cout << "  imgcomp 75         compress to WebP at quality 75" << std::endl;
-    std::cout << "  imgcomp 50 same    keep original formats, quality 50" << std::endl;
+    std::cout << "  imgcomp                   compress all input*/ folders to WebP at quality 40" << std::endl;
+    std::cout << "  imgcomp 75                compress to WebP at quality 75" << std::endl;
+    std::cout << "  imgcomp 50 same           keep original formats, quality 50" << std::endl;
+    std::cout << "  imgcomp --input photos    compress only the 'photos' folder" << std::endl;
+    std::cout << "  imgcomp 75 --input photos --output compressed" << std::endl;
 }
 
 int main(int argc, char* argv[]) {
@@ -247,9 +254,31 @@ int main(int argc, char* argv[]) {
 
     int quality = 40;
     bool same_format = false;
+    std::string input_dir;
+    std::string output_dir;
 
-    if (argc > 1) { try { quality = std::stoi(argv[1]); } catch (...) {} }
-    if (argc > 2 && std::string(argv[2]) == "same") { same_format = true; }
+    for (int i = 1; i < argc; i++) {
+        std::string a = argv[i];
+        if (a == "-i" || a == "--input") {
+            if (i + 1 < argc) input_dir = argv[++i];
+        } else if (a == "-o" || a == "--output") {
+            if (i + 1 < argc) output_dir = argv[++i];
+        } else if (a == "same") {
+            same_format = true;
+        } else {
+            try { quality = std::stoi(a); } catch (...) {}
+        }
+    }
+
+    if (output_dir.empty() && !input_dir.empty()) {
+        output_dir = input_dir + "_com";
+    }
+
+    if (!input_dir.empty()) {
+        process_directory(fs::path(input_dir), quality, same_format,
+                          output_dir.empty() ? fs::path("") : fs::path(output_dir));
+        return 0;
+    }
 
     bool found = false;
     for (const auto& entry : fs::directory_iterator(fs::current_path())) {
