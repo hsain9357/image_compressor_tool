@@ -17,8 +17,8 @@ imgcomp [quality] [mode] [options]
 
 | Flag | Description |
 |------|-------------|
-| `-i, --input <dir>`  | Process only this directory (overrides auto-detection) |
-| `-o, --output <dir>` | Output directory (requires `--input`) |
+| `-i, --input <path>`  | Input file or directory (overrides auto-detection) |
+| `-o, --output <path>` | Output file or directory (requires `--input`) |
 
 ## How It Works (default mode)
 
@@ -52,6 +52,12 @@ imgcomp --input photos
 
 # Custom input and output directories
 imgcomp 75 --input photos --output compressed
+
+# Compress a single file (output auto-named photo.webp)
+imgcomp --input photo.jpg
+
+# Single file with explicit output
+imgcomp --input photo.jpg --output compressed.webp
 
 # Quick max-quality compression
 imgcomp 100 same

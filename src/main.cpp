@@ -213,10 +213,29 @@ void process_directory(const fs::path& input_dir, int quality, bool same_format,
     std::cout << std::string(80, '-') << std::endl << std::endl;
 }
 
+void process_single_file(const fs::path& input_path, const fs::path& output_path, int quality, bool same_format) {
+    uintmax_t old_size = fs::file_size(input_path);
+    std::cout << "\033[1;33mProcessing: " << input_path.filename() << " (" << quality << "% quality, format: " << (same_format ? "original" : "webp") << ")\033[0m" << std::endl;
+    std::cout << std::string(80, '-') << std::endl;
+    std::cout << std::left << std::setw(30) << "File" << std::setw(15) << "Original" << std::setw(15) << "Compressed" << "Reduction" << std::endl;
+    std::cout << std::string(80, '-') << std::endl;
+
+    if (compress_image(input_path, output_path, quality, same_format)) {
+        uintmax_t new_size = fs::file_size(output_path);
+        double ratio = (1.0 - (double)new_size / old_size) * 100.0;
+        std::cout << std::left << std::setw(30) << input_path.filename().string().substr(0, 29)
+                  << std::setw(15) << format_size(old_size)
+                  << std::setw(15) << format_size(new_size)
+                  << std::fixed << std::setprecision(1) << ratio << "%" << std::endl;
+    }
+    std::cout << std::string(80, '-') << std::endl << std::endl;
+}
+
 void print_usage() {
     std::cout << "Usage: imgcomp [quality] [mode] [options]" << std::endl;
     std::cout << std::endl;
-    std::cout << "Compresses all JPEG/PNG images inside directories prefixed with 'input'." << std::endl;
+    std::cout << "Compresses JPEG/PNG images in directories prefixed with 'input'," << std::endl;
+    std::cout << "or a single image via --input." << std::endl;
     std::cout << std::endl;
     std::cout << "Positional:" << std::endl;
     std::cout << "  quality  Compression quality 0-100 (default: 40)" << std::endl;
@@ -224,14 +243,16 @@ void print_usage() {
     std::cout << "           images are transcoded to WebP (default: webp)" << std::endl;
     std::cout << std::endl;
     std::cout << "Options:" << std::endl;
-    std::cout << "  -i, --input <dir>    Process only this directory (overrides auto-detection)" << std::endl;
-    std::cout << "  -o, --output <dir>   Output directory (requires --input)" << std::endl;
+    std::cout << "  -i, --input <path>   Input file or directory (overrides auto-detection)" << std::endl;
+    std::cout << "  -o, --output <path>  Output file or directory (requires --input)" << std::endl;
     std::cout << std::endl;
     std::cout << "Examples:" << std::endl;
-    std::cout << "  imgcomp                   compress all input*/ folders to WebP at quality 40" << std::endl;
-    std::cout << "  imgcomp 75                compress to WebP at quality 75" << std::endl;
-    std::cout << "  imgcomp 50 same           keep original formats, quality 50" << std::endl;
-    std::cout << "  imgcomp --input photos    compress only the 'photos' folder" << std::endl;
+    std::cout << "  imgcomp                          compress all input*/ folders at quality 40" << std::endl;
+    std::cout << "  imgcomp 75                       compress to WebP at quality 75" << std::endl;
+    std::cout << "  imgcomp 50 same                  keep original formats, quality 50" << std::endl;
+    std::cout << "  imgcomp --input photos           compress the 'photos' folder" << std::endl;
+    std::cout << "  imgcomp --input photo.jpg        compress a single file" << std::endl;
+    std::cout << "  imgcomp --input photo.jpg --output out.webp" << std::endl;
     std::cout << "  imgcomp 75 --input photos --output compressed" << std::endl;
 }
 
@@ -270,13 +291,30 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    if (output_dir.empty() && !input_dir.empty()) {
-        output_dir = input_dir + "_com";
-    }
-
     if (!input_dir.empty()) {
-        process_directory(fs::path(input_dir), quality, same_format,
-                          output_dir.empty() ? fs::path("") : fs::path(output_dir));
+        fs::path in_path(input_dir);
+        if (fs::is_regular_file(in_path)) {
+            std::string ext = in_path.extension().string();
+            for (auto& c : ext) c = std::tolower(c);
+            if (ext != ".jpg" && ext != ".jpeg" && ext != ".png") {
+                std::cout << "Unsupported file format: " << ext << std::endl;
+                return 1;
+            }
+            fs::path out_path;
+            if (!output_dir.empty()) {
+                out_path = fs::path(output_dir);
+            } else if (!same_format) {
+                out_path = in_path;
+                out_path.replace_extension(".webp");
+            } else {
+                auto stem = in_path.stem().string() + "_com";
+                out_path = in_path.parent_path() / (stem + in_path.extension().string());
+            }
+            process_single_file(in_path, out_path, quality, same_format);
+        } else {
+            if (output_dir.empty()) output_dir = input_dir + "_com";
+            process_directory(in_path, quality, same_format, fs::path(output_dir));
+        }
         return 0;
     }
 
