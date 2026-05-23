@@ -166,9 +166,10 @@ bool compress_image(const fs::path& input_path, const fs::path& output_path, int
     return false;
 }
 
-void process_directory(const fs::path& input_dir, int quality, bool same_format) {
-    std::string folder_name = input_dir.filename().string();
-    fs::path output_dir = input_dir.parent_path() / (folder_name + "_com");
+void process_directory(const fs::path& input_dir, int quality, bool same_format, const fs::path& output_dir_override = "") {
+    fs::path output_dir = output_dir_override.empty()
+        ? input_dir.parent_path() / (input_dir.filename().string() + "_com")
+        : output_dir_override;
     if (!fs::exists(output_dir)) fs::create_directories(output_dir);
 
     std::cout << "\033[1;33mProcessing: " << input_dir.filename() << " (" << quality << "% quality, format: " << (same_format ? "original" : "webp") << ")\033[0m" << std::endl;
@@ -212,7 +213,30 @@ void process_directory(const fs::path& input_dir, int quality, bool same_format)
     std::cout << std::string(80, '-') << std::endl << std::endl;
 }
 
+void print_usage() {
+    std::cout << "Usage: imgcomp [quality] [mode]" << std::endl;
+    std::cout << std::endl;
+    std::cout << "Compresses all JPEG/PNG images inside directories prefixed with 'input'." << std::endl;
+    std::cout << std::endl;
+    std::cout << "  quality  Compression quality 0-100 (default: 40)" << std::endl;
+    std::cout << "  mode     Set to 'same' to keep original format; otherwise all" << std::endl;
+    std::cout << "           images are transcoded to WebP (default: webp)" << std::endl;
+    std::cout << std::endl;
+    std::cout << "Examples:" << std::endl;
+    std::cout << "  imgcomp            compress all input*/ folders to WebP at quality 40" << std::endl;
+    std::cout << "  imgcomp 75         compress to WebP at quality 75" << std::endl;
+    std::cout << "  imgcomp 50 same    keep original formats, quality 50" << std::endl;
+}
+
 int main(int argc, char* argv[]) {
+    if (argc > 1) {
+        std::string arg1 = argv[1];
+        if (arg1 == "-h" || arg1 == "--help") {
+            print_usage();
+            return 0;
+        }
+    }
+
     std::cout << "\033[1;36m" << "  _____                     _ " << std::endl;
     std::cout << " |_   _|                   | |" << std::endl;
     std::cout << "   | |  _ __ ___   __ _  __| |" << std::endl;
