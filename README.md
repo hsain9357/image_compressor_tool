@@ -15,7 +15,7 @@ A fast, multi-threaded C++17 tool for bulk compressing JPEG and PNG images. Supp
 ## Prerequisites
 
 - `g++` with C++17 support
-- `libjpeg`, `libwebp`, `libpng` (development packages)
+- `cmake`, `make`, `curl` (for building static dependencies)
 - Rust/Cargo (for the `libimagequant` submodule)
 
 ## Quick Start
@@ -25,17 +25,14 @@ A fast, multi-threaded C++17 tool for bulk compressing JPEG and PNG images. Supp
 git clone --recurse-submodules <repo-url>
 cd bulk_image_compressor
 
-# Build the Rust FFI library
-cd libimagequant/imagequant-sys
-cargo build --release
-cd ../..
-
-# Build the tool
+# Build the tool (static binary, no system libs needed)
 make
 
 # Run it
 ./imgcomp
 ```
+
+The first `make` run downloads and builds `zlib`, `libjpeg-turbo`, `libpng`, and `libwebp` from source as static libraries — no development packages required. Subsequent builds reuse the cached static libs.
 
 See [USAGE.md](USAGE.md) for detailed usage and examples.
 
