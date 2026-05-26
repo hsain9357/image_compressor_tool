@@ -38,8 +38,14 @@ See [USAGE.md](USAGE.md) for detailed usage and examples.
 
 ## Install
 
+### From source
 ```bash
 make install   # copies to /usr/local/bin
+```
+
+### Pre-built binary (no build tools needed)
+```bash
+curl -L https://github.com/hsain9357/image_compressor_tool/releases/download/v1.0.0/imgcomp -o /usr/local/bin/imgcomp && chmod +x /usr/local/bin/imgcomp
 ```
 
 ## How It Works
